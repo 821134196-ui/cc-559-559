@@ -7,7 +7,13 @@ __pycache__/
 target/
 dist/
 build/
+server/uploads/*
+!server/uploads/.gitkeep
 *.log
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
 .claude/
 .cc-workbench/
 轨迹/

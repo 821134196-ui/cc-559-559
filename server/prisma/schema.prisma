@@ -1,0 +1,162 @@
+// 体育中心运动损伤应急处置系统 - 数据模型
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// 系统用户：前台值班员 / 急救员 / 管理员
+model User {
+  id           Int           @id @default(autoincrement())
+  username     String        @unique
+  name         String
+  role         String // DISPATCHER(前台值班员) | MEDIC(急救员) | ADMIN(管理员)
+  phone        String?
+  active       Boolean       @default(true)
+  createdAt    DateTime      @default(now())
+  events       Incident[]    @relation("CurrentHandler")
+  dispatchedBy IncidentEvent[] @relation("Dispatcher")
+  performedBy  IncidentEvent[] @relation("Performer")
+  attachments  Attachment[]
+  participants Participant[]
+  mockLogs     MockLog[]
+  notifications MockNotification[]
+  recordedInjuries InjuredPerson[]
+}
+
+// 一起事件（误报、重复报警、换班、转院都沿原事件保留）
+model Incident {
+  id                 Int                @id @default(autoincrement())
+  code               String             @unique // 事件编号，如 INC-20261004-001
+  location           String // 地点
+  occurredAt         DateTime // 发生时间
+  // 伤者基本情况（报警时只填简要，详细资料见 injuredPerson）
+  victimBrief        String // 简要情况：性别/大致年龄/主诉
+  victimContactPhone String? // 可选联系电话
+  initialHandlerNote String? // 当前处置人（值班员初派）
+  severity           String @default("NORMAL") // NORMAL | HIGH（高风险）
+  status             String @default("PENDING") // PENDING 待接手 | ACTIVE 处置中 | RESOLVED 已结案 | FALSE_ALARM 误报
+  // 唯一有效接手人（抢单成功的急救员），null 表示尚未接手
+  currentHandlerId   Int?
+  currentHandler     User?   @relation("CurrentHandler", fields: [currentHandlerId], references: [id])
+  acceptedAt         DateTime?
+  escalatedAt        DateTime?
+  closedAt           DateTime?
+  closeReason        String?
+  // 重复报警关联：指向最初的事件
+  duplicateOfId      Int?
+  duplicateOf        Incident? @relation("Duplicates", fields: [duplicateOfId], references: [id])
+  duplicates         Incident[] @relation("Duplicates")
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  events         IncidentEvent[]
+  injuredPerson  InjuredPerson?
+  participants   Participant[]
+  attachments    Attachment[]
+  notifications  MockNotification[]
+
+  @@index([status])
+}
+
+// 伤者详细资料（PII，仅参与处置者可查看）
+model InjuredPerson {
+  id           Int      @id @default(autoincrement())
+  incidentId   Int      @unique
+  incident     Incident @relation(fields: [incidentId], references: [id], onDelete: Cascade)
+  name         String?
+  gender       String?
+  age          Int?
+  phone        String?
+  idNumber     String? // 证件号（脱敏展示）
+  address      String?
+  medicalNote  String? // 既往史/过敏史等
+  recordedById Int?
+  recordedBy   User?    @relation(fields: [recordedById], references: [id])
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @default(now())
+}
+
+// 时间线事件：每次处置与交接都追加，不删除
+model IncidentEvent {
+  id           Int       @id @default(autoincrement())
+  incidentId   Int
+  incident     Incident  @relation(fields: [incidentId], references: [id], onDelete: Cascade)
+  // CREATE报警 | ACCEPT接手 | ASSESS现场评估 | TREAT处置 | FAMILY联系家属
+  // TRANSFER_HANDOFF换班交接 | HOSPITAL转院 | ESCALATE升级
+  // CORRECTION更正 | FALSE_ALARM误报标记 | DUPLICATE重复报警关联 | CLOSE结案
+  type         String
+  content      String    @default("")
+  // 处置内容更正时保留原文
+  correctedFromId Int?
+  correctedFrom IncidentEvent? @relation("Corrections", fields: [correctedFromId], references: [id])
+  corrections  IncidentEvent[] @relation("Corrections")
+  // 元数据：换班交接人、转院医院、重复事件编号、升级原因等
+  meta         String? // JSON
+  performerId  Int?
+  performer    User?     @relation("Performer", fields: [performerId], references: [id])
+  dispatcherId Int?      // 报警登记的值班员
+  dispatcher   User?     @relation("Dispatcher", fields: [dispatcherId], references: [id])
+  createdAt    DateTime  @default(now())
+
+  @@index([incidentId])
+}
+
+// 参与处置人员名单（决定谁能查看伤者 PII）
+model Participant {
+  id          Int      @id @default(autoincrement())
+  incidentId  Int
+  incident    Incident @relation(fields: [incidentId], references: [id], onDelete: Cascade)
+  userId      Int
+  user        User     @relation(fields: [userId], references: [id])
+  role        String // ACCEPTOR 接手人 | SUPPORT 协助 | HANDOFF 换班接手
+  joinedAt    DateTime @default(now())
+
+  @@unique([incidentId, userId])
+}
+
+// 本地保存的附件（现场照片、单据等）
+model Attachment {
+  id         Int      @id @default(autoincrement())
+  incidentId Int
+  incident   Incident @relation(fields: [incidentId], references: [id], onDelete: Cascade)
+  filename   String // 存储文件名
+  originalName String
+  mimeType   String
+  size       Int
+  uploaderId Int?
+  uploader   User?    @relation(fields: [uploaderId], references: [id])
+  createdAt  DateTime @default(now())
+
+  @@index([incidentId])
+}
+
+// 模拟通知（短信/App推送）发送记录
+model MockNotification {
+  id         Int      @id @default(autoincrement())
+  incidentId Int
+  incident   Incident @relation(fields: [incidentId], references: [id], onDelete: Cascade)
+  channel    String // SMS | APP | CALL
+  target     String // 接收方（急救员/家属）
+  content    String
+  status     String @default("SENT") // SENT | DELIVERED | FAILED
+  operatorId Int?
+  operator   User?    @relation(fields: [operatorId], references: [id])
+  sentAt     DateTime @default(now())
+}
+
+// 模拟急救机构接口调用与回执
+model MockLog {
+  id         Int      @id @default(autoincrement())
+  incidentId Int?
+  provider   String // AMBULANCE 急救中心 | HOSPITAL 接收医院
+  action     String // DISPATCH 派车 | RECEIVE 医院接收
+  request    String // JSON 请求体
+  response   String // JSON 回执
+  operatorId Int?
+  operator   User?    @relation(fields: [operatorId], references: [id])
+  createdAt  DateTime @default(now())
+}
