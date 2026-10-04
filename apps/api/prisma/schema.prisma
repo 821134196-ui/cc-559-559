@@ -1,0 +1,82 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = "file:./dev.db"
+}
+
+// 用户：值班员 DISPATCHER / 急救员 MEDIC / 管理人员 ADMIN（另有 system 账号用于写入系统记录）
+model User {
+  id        String   @id @default(cuid())
+  username  String   @unique
+  name      String
+  role      String
+  token     String   @unique // 演示环境：静态令牌即登录凭证
+  createdAt DateTime @default(now())
+  entries   Entry[]
+}
+
+// 事件：一次运动损伤求助。误报/重复/换班/转院等全部沿本事件留痕，不另起记录。
+model Event {
+  id             String         @id @default(cuid())
+  code           String         @unique
+  location       String
+  occurredAt     DateTime
+  injuredName    String
+  injuredGender  String         @default("未知")
+  injuredAge     Int?
+  injuredContact String? // 伤者/家属联系方式（敏感，仅参与处置人员可见）
+  description    String         @default("")
+  riskLevel      String         @default("NORMAL") // NORMAL | HIGH
+  status         String         @default("PENDING") // PENDING | CLAIMED | ESCALATED | CLOSED
+  closeReason    String? // RESOLVED | FALSE_ALARM | DUPLICATE
+  createdById    String
+  assigneeId     String? // 当前唯一有效处置人
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+  entries        Entry[]
+  attachments    Attachment[]
+  notifications  Notification[]
+}
+
+// 时间线条目：报案/接手/评估/联系家属/转送/回执/交接/升级/关闭/备注。
+// 更正采用“新条目 + supersedesId 指向原条目”，原文永不删除。
+model Entry {
+  id           String   @id @default(cuid())
+  eventId      String
+  event        Event    @relation(fields: [eventId], references: [id])
+  authorId     String
+  author       User     @relation(fields: [authorId], references: [id])
+  type         String
+  content      String
+  meta         String? // JSON 附加信息（转送医院、交接原因、关闭原因等）
+  supersedesId String? // 若不为空，表示本条是对该条目的更正
+  createdAt    DateTime @default(now())
+}
+
+model Attachment {
+  id           String   @id @default(cuid())
+  eventId      String
+  event        Event    @relation(fields: [eventId], references: [id])
+  filename     String // 原始文件名
+  storedName   String // 本地磁盘文件名
+  mimeType     String
+  size         Int
+  uploadedById String
+  createdAt    DateTime @default(now())
+}
+
+// 本地模拟接口产生的通知与急救机构回执
+model Notification {
+  id        String    @id @default(cuid())
+  eventId   String
+  event     Event     @relation(fields: [eventId], references: [id])
+  channel   String // EMS（急救机构）| INTERNAL（内部升级通知）
+  payload   String
+  status    String    @default("SENT") // SENT | ACKED
+  receipt   String?
+  createdAt DateTime  @default(now())
+  ackedAt   DateTime?
+}

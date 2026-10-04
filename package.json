@@ -1,0 +1,19 @@
+{
+  "name": "sports-center-emergency",
+  "version": "1.0.0",
+  "private": true,
+  "description": "体育中心运动损伤应急处置报告系统（NestJS + Prisma + SQLite + React）",
+  "workspaces": [
+    "apps/api",
+    "apps/web"
+  ],
+  "scripts": {
+    "dev": "concurrently -k -n api,web -c blue,green \"npm run dev -w apps/api\" \"npm run dev -w apps/web\"",
+    "build": "npm run build -w apps/api && npm run build -w apps/web && rm -rf apps/api/public && cp -r apps/web/dist apps/api/public",
+    "start": "npm run start -w apps/api",
+    "demo": "node scripts/demo.mjs"
+  },
+  "devDependencies": {
+    "concurrently": "^9.0.1"
+  }
+}

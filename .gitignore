@@ -13,3 +13,9 @@ build/
 轨迹/
 录屏/
 视频/
+
+# 项目运行时产物
+apps/api/prisma/dev.db
+apps/api/prisma/dev.db-journal
+apps/api/uploads/
+apps/api/public/
